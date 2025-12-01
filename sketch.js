@@ -1,6 +1,6 @@
 /*
- * * 📱 Ultimate Final Fix: 彻底解决手机拖拽不动的问题
- * * 核心：使用原生事件监听器强行禁止 touchmove 默认行为
+ * * 📱 Ultimate Pro: 手勢定格 + 完美拖拽 + 清空功能
+ * * 新增：右上角 CLEAR 按鈕，一鍵清空畫布
  */
 
 let handPose;
@@ -8,46 +8,46 @@ let video;
 let hands = [];
 let snapshots = []; 
 
-// 交互状态
+// 交互狀態
 let hoverStartTime = 0;
 let isHovering = false;
 let hasSnapped = false;
 let lastCenterX = 0;
 let lastCenterY = 0;
 
-// 拖拽变量
+// 拖拽變量
 let draggedSnapshot = null;
 let dragOffsetX = 0;
 let dragOffsetY = 0;
 
-// ⚙️ 参数
-let totalTime = 500;   // 定格时间
-let margin = 35;       // 手指避让
+// ⚙️ 參數
+let totalTime = 500;   // 定格時間
+let margin = 35;       // 手指避讓
 
-// 📷 摄像头控制
+// 📷 攝像頭控制
 let usingFrontCamera = true; 
 let switchBtn;
 let saveBtn;
+let clearBtn; // 新增：清空按鈕變量
 
 function preload() {
   handPose = ml5.handPose();
 }
 
 function setup() {
-  // 1. 创建画布
+  // 1. 創建畫布
   let c = createCanvas(windowWidth, windowHeight);
   pixelDensity(1);
 
-  // --- 🔒 核弹级防滚动设置 (关键) ---
-  // 强制禁止画布上的触摸滚动，确保拖拽流畅
+  // --- 🔒 核彈級防滾動設置 ---
   c.elt.addEventListener("touchmove", function(event) {
     event.preventDefault();
   }, { passive: false });
   
   c.elt.style.touchAction = "none"; 
-  document.body.style.overflow = "hidden"; // 整个网页禁止滚动
+  document.body.style.overflow = "hidden"; 
 
-  // --- URL 参数检测 ---
+  // --- URL 參數檢測 ---
   let params = getURLParams();
   let camMode = 'user'; 
 
@@ -59,7 +59,7 @@ function setup() {
     usingFrontCamera = true;
   }
 
-  // --- 启动摄像头 ---
+  // --- 啟動攝像頭 ---
   let constraints = {
     audio: false,
     video: {
@@ -70,7 +70,7 @@ function setup() {
   };
 
   video = createCapture(constraints, function(stream) {
-    console.log("摄像头启动: " + camMode);
+    console.log("攝像頭啟動: " + camMode);
     handPose.detectStart(video, gotHands);
   });
 
@@ -78,16 +78,33 @@ function setup() {
   video.size(width, height);
   video.hide();
 
-  // --- UI 按钮 ---
-  switchBtn = createButton('🔄 刷新切换');
+  // --- UI 按鈕區域 ---
+  
+  // 1. 左上角：切換鏡頭
+  switchBtn = createButton('🔄 SWITCH');
   switchBtn.position(20, 20);
   switchBtn.mousePressed(switchCameraByReload); 
   styleButton(switchBtn);
 
+  // 2. 右上角：清空畫布 (新增)
+  clearBtn = createButton('CLEAR');
+  clearBtn.position(width - 100, 20); // 放在右上角
+  clearBtn.mousePressed(clearAllSnapshots);
+  styleButton(clearBtn);
+  // 給清空按鈕加個紅色文字提示危險操作 (可選)
+  clearBtn.style('color', '#d9534f'); 
+
+  // 3. 底部居中：下載
   saveBtn = createButton('⬇️ DOWNLOAD');
   saveBtn.position(width / 2 - 75, height - 80);
   saveBtn.mousePressed(savePicture);
   styleButton(saveBtn);
+}
+
+// --- 新增功能：清空所有照片 ---
+function clearAllSnapshots() {
+  snapshots = [];
+  draggedSnapshot = null; // 確保沒有殘留的拖拽狀態
 }
 
 function switchCameraByReload() {
@@ -101,7 +118,7 @@ function draw() {
   
   push();
   
-  // 智能镜像
+  // 智能鏡像
   if (usingFrontCamera) {
     translate(width, 0); 
     scale(-1, 1);
@@ -110,7 +127,7 @@ function draw() {
     scale(1, 1);
   }
   
-  // 1. 背景视频
+  // 1. 背景視頻
   if (video) {
     image(video, 0, 0, width, height);
   }
@@ -119,12 +136,12 @@ function draw() {
   for (let i = 0; i < snapshots.length; i++) {
     let snap = snapshots[i];
     
-    // 如果是正在拖拽的那张，画个黄色框提示用户“选中了”
+    // 選中狀態顯示黃框
     if (snap === draggedSnapshot) {
-      stroke(255, 255, 0); // 黄色
+      stroke(255, 255, 0); 
       strokeWeight(5);
     } else {
-      stroke(255); // 白色
+      stroke(255); 
       strokeWeight(3);
     }
     
@@ -133,7 +150,7 @@ function draw() {
     image(snap.img, snap.x, snap.y);
   }
 
-  // 3. 手势识别
+  // 3. 手勢識別
   if (hands.length > 0) {
     let hand = hands[0];
     let thumb = hand.keypoints[4];
@@ -156,7 +173,7 @@ function draw() {
     let currentCenterY = y + h / 2;
     let movement = dist(currentCenterX, currentCenterY, lastCenterX, lastCenterY);
     
-    // 只有没在拖拽时才触发定格
+    // 定格觸發
     if (draggedSnapshot === null && movement < 8 && w > 20 && h > 20) {
       if (!isHovering) {
         hoverStartTime = millis();
@@ -171,7 +188,7 @@ function draw() {
     lastCenterX = currentCenterX;
     lastCenterY = currentCenterY;
 
-    // 视觉反馈
+    // 視覺反饋
     if (isHovering) {
       let elapsedTime = millis() - hoverStartTime;
       let progress = constrain(elapsedTime / totalTime, 0, 1);
@@ -215,24 +232,18 @@ function gotHands(results) {
 }
 
 // ==============================
-// 🖱️ 交互逻辑 (强力修正版)
+// 🖱️ 交互邏輯
 // ==============================
 
-// 统一处理点击/触摸开始
 function handleInputStart() {
   let inputX = mouseX;
-  
-  // 修正坐标：前置摄像头时，输入坐标需要镜像翻转
   if (usingFrontCamera) {
     inputX = width - mouseX; 
   }
   let inputY = mouseY;
 
-  // 倒序检查（优先选中最上面的图）
   for (let i = snapshots.length - 1; i >= 0; i--) {
     let s = snapshots[i];
-    
-    // 稍微扩大一点点击范围 (+10px)，方便手指点击
     if (inputX > s.x - 10 && inputX < s.x + s.w + 10 &&
         inputY > s.y - 10 && inputY < s.y + s.h + 10) {
       
@@ -240,17 +251,15 @@ function handleInputStart() {
       dragOffsetX = inputX - s.x;
       dragOffsetY = inputY - s.y;
       
-      // 置顶
       snapshots.splice(i, 1);
       snapshots.push(s);
       
-      return false; // 阻止默认行为
+      return false; 
     }
   }
   return false;
 }
 
-// 统一处理拖拽/移动
 function handleInputMove() {
   if (draggedSnapshot) {
     let inputX = mouseX;
@@ -262,7 +271,7 @@ function handleInputMove() {
     draggedSnapshot.x = inputX - dragOffsetX;
     draggedSnapshot.y = inputY - dragOffsetY;
     
-    return false; // 防止拖拽时滚动页面
+    return false; 
   }
 }
 
@@ -271,7 +280,6 @@ function handleInputEnd() {
   return false;
 }
 
-// 绑定 p5.js 的事件
 function mousePressed() { return handleInputStart(); }
 function mouseDragged() { return handleInputMove(); }
 function mouseReleased() { return handleInputEnd(); }
@@ -281,12 +289,12 @@ function touchEnded() { return handleInputEnd(); }
 
 
 // ==============================
-// 🎨 样式与辅助
+// 🎨 樣式與輔助
 // ==============================
 
 function styleButton(btn) {
-  btn.style('font-size', '16px');
-  btn.style('padding', '10px 20px');
+  btn.style('font-size', '14px'); // 字稍微改小一點點，避免遮擋太多
+  btn.style('padding', '10px 15px');
   btn.style('background-color', 'white');
   btn.style('color', '#333');
   btn.style('border', 'none');
@@ -294,7 +302,7 @@ function styleButton(btn) {
   btn.style('box-shadow', '0 2px 5px rgba(0,0,0,0.3)');
   btn.style('font-weight', 'bold');
   btn.style('touch-action', 'manipulation'); 
-  btn.style('z-index', '100'); // 确保按钮在最上层
+  btn.style('z-index', '100'); 
 }
 
 function savePicture() {
@@ -303,10 +311,13 @@ function savePicture() {
 
 function windowResized() {
   resizeCanvas(windowWidth, windowHeight);
+  // 重新定位所有按鈕
   if(saveBtn) saveBtn.position(width / 2 - 75, height - 80);
+  if(clearBtn) clearBtn.position(width - 100, 20);
+  if(switchBtn) switchBtn.position(20, 20);
 }
 
-// 辅助函数：获取 URL 参数
+// 輔助函數：獲取 URL 參數
 function getURLParams() {
   let params = {};
   let parts = window.location.href.replace(/[?&]+([^=&]+)=([^&]*)/gi, function(m,key,value) {
