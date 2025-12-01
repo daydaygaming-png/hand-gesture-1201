@@ -1,9 +1,8 @@
 /*
- * * 📱 手机版 Final Fix：强制释放摄像头资源
- * * 核心修复：切换前强制 .stop() 所有视频流，防止硬件死锁
+ * * 📱 Ultimate Stable: 刷新式切换 + 默认前置
+ * * 核心：利用网页刷新来清理摄像头占用，解决手势识别卡死问题
  */
 
-// --- 1. 全局变量 ---
 let handPose;
 let video;
 let hands = [];
@@ -21,12 +20,12 @@ let draggedSnapshot = null;
 let dragOffsetX = 0;
 let dragOffsetY = 0;
 
-// ⚙️ 参数设置
+// ⚙️ 参数
 let totalTime = 500;   // 定格时间
-let margin = 35;       // 手指避让距离
+let margin = 35;       // 手指避让
 
-// 📷 摄像头状态
-let usingFrontCamera = true; // 默认为前置
+// 📷 摄像头控制
+let usingFrontCamera = true; // 标记当前是不是前置
 let switchBtn;
 let saveBtn;
 
@@ -38,13 +37,44 @@ function setup() {
   createCanvas(windowWidth, windowHeight);
   pixelDensity(1);
 
-  // 初始化摄像头
-  initCamera();
+  // --- 1. 核心逻辑：检查 URL 参数决定开哪个摄像头 ---
+  // 这种方式最稳定，每次都是全新的开始
+  let params = getURLParams();
+  let camMode = 'user'; // 默认：user (前置)
 
-  // --- 创建 UI 按钮 ---
-  switchBtn = createButton('🔄 切换镜头');
+  // 如果网址里写了 ?cam=environment，那就开后置
+  if (params.cam === 'environment') {
+    camMode = 'environment';
+    usingFrontCamera = false;
+  } else {
+    camMode = 'user';
+    usingFrontCamera = true;
+  }
+
+  // --- 2. 启动摄像头 ---
+  let constraints = {
+    audio: false,
+    video: {
+      facingMode: camMode,
+      width: { ideal: 1280 },
+      height: { ideal: 720 }
+    }
+  };
+
+  video = createCapture(constraints, function(stream) {
+    console.log("摄像头启动成功: " + camMode);
+    // 只有启动成功才开始识别
+    handPose.detectStart(video, gotHands);
+  });
+
+  video.elt.setAttribute('playsinline', '');
+  video.size(width, height);
+  video.hide();
+
+  // --- 3. UI 按钮 ---
+  switchBtn = createButton('🔄 刷新切换');
   switchBtn.position(20, 20);
-  switchBtn.mousePressed(toggleCamera);
+  switchBtn.mousePressed(switchCameraByReload); // 绑定新的切换函数
   styleButton(switchBtn);
 
   saveBtn = createButton('⬇️ DOWNLOAD');
@@ -53,52 +83,15 @@ function setup() {
   styleButton(saveBtn);
 }
 
-// --- 辅助函数：彻底停止当前视频流 ---
-function stopCurrentVideo() {
-  if (video) {
-    // 1. 获取视频流
-    let stream = video.elt.srcObject;
-    // 2. 如果流存在，遍历所有轨道并强制停止
-    if (stream) {
-      let tracks = stream.getTracks();
-      tracks.forEach(track => track.stop());
-    }
-    // 3. 移除 DOM 元素
-    video.remove();
-    video = null;
-  }
-}
-
-// --- 初始化摄像头 ---
-function initCamera() {
-  // 先彻底杀掉旧视频
-  stopCurrentVideo();
-
-  let constraints = {
-    audio: false,
-    video: {
-      facingMode: usingFrontCamera ? "user" : "environment",
-      width: { ideal: 1280 },
-      height: { ideal: 720 }
-    }
-  };
-
-  // 创建新视频
-  video = createCapture(constraints, function(stream) {
-    console.log("新摄像头已启动");
-    // 只有在新摄像头成功启动后，才重新连接手势识别
-    handPose.detectStart(video, gotHands);
-  });
+// --- ♻️ 新的切换逻辑：刷新网页 ---
+function switchCameraByReload() {
+  // 如果当前是前置，就去后置；反之亦然
+  let nextMode = usingFrontCamera ? 'environment' : 'user';
   
-  video.elt.setAttribute('playsinline', '');
-  video.size(width, height);
-  video.hide();
-}
-
-// 切换摄像头逻辑
-function toggleCamera() {
-  usingFrontCamera = !usingFrontCamera; 
-  initCamera();   
+  // 修改 URL 并刷新页面
+  // 例如：index.html?cam=environment
+  let currentUrl = window.location.href.split('?')[0];
+  window.location.href = currentUrl + "?cam=" + nextMode;
 }
 
 function draw() {
@@ -106,7 +99,7 @@ function draw() {
   
   push();
   
-  // 智能镜像处理
+  // 智能镜像：只有前置摄像头镜像
   if (usingFrontCamera) {
     translate(width, 0); 
     scale(-1, 1);
@@ -152,7 +145,7 @@ function draw() {
     let currentCenterY = y + h / 2;
     let movement = dist(currentCenterX, currentCenterY, lastCenterX, lastCenterY);
     
-    // 定格触发逻辑
+    // 定格触发
     if (draggedSnapshot === null && movement < 8 && w > 20 && h > 20) {
       if (!isHovering) {
         hoverStartTime = millis();
@@ -222,14 +215,11 @@ function mousePressed() {
     let s = snapshots[i];
     if (inputX > s.x && inputX < s.x + s.w &&
         inputY > s.y && inputY < s.y + s.h) {
-      
       draggedSnapshot = s;
       dragOffsetX = inputX - s.x;
       dragOffsetY = inputY - s.y;
-      
       snapshots.splice(i, 1);
       snapshots.push(s);
-      
       return false; 
     }
   }
@@ -242,10 +232,8 @@ function mouseDragged() {
       inputX = width - mouseX;
     }
     let inputY = mouseY;
-
     draggedSnapshot.x = inputX - dragOffsetX;
     draggedSnapshot.y = inputY - dragOffsetY;
-    
     return false; 
   }
 }
@@ -273,5 +261,4 @@ function savePicture() {
 function windowResized() {
   resizeCanvas(windowWidth, windowHeight);
   if(saveBtn) saveBtn.position(width / 2 - 75, height - 80);
-  if(video) video.size(windowWidth, windowHeight);
 }
