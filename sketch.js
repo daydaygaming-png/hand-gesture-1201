@@ -1,6 +1,6 @@
 /*
- * * 📱 Ultimate Final: 刷新切换 + 完美拖拽
- * * 修复：添加 touch-action: none 防止浏览器滚动干扰拖拽
+ * * 📱 Ultimate Final Fix: 彻底解决手机拖拽不动的问题
+ * * 核心：使用原生事件监听器强行禁止 touchmove 默认行为
  */
 
 let handPose;
@@ -34,13 +34,18 @@ function preload() {
 }
 
 function setup() {
-  // 1. 创建画布并赋值给变量 c，方便设置样式
+  // 1. 创建画布
   let c = createCanvas(windowWidth, windowHeight);
   pixelDensity(1);
 
-  // 【关键修复】禁止浏览器默认的“滚动”和“下拉刷新”行为
-  // 这样你的手指拖拽图片时，页面才不会跟着动
-  c.style('touch-action', 'none'); 
+  // --- 🔒 核弹级防滚动设置 (关键) ---
+  // 强制禁止画布上的触摸滚动，确保拖拽流畅
+  c.elt.addEventListener("touchmove", function(event) {
+    event.preventDefault();
+  }, { passive: false });
+  
+  c.elt.style.touchAction = "none"; 
+  document.body.style.overflow = "hidden"; // 整个网页禁止滚动
 
   // --- URL 参数检测 ---
   let params = getURLParams();
@@ -111,9 +116,18 @@ function draw() {
   }
 
   // 2. 照片
-  for (let snap of snapshots) {
-    stroke(255);
-    strokeWeight(3);
+  for (let i = 0; i < snapshots.length; i++) {
+    let snap = snapshots[i];
+    
+    // 如果是正在拖拽的那张，画个黄色框提示用户“选中了”
+    if (snap === draggedSnapshot) {
+      stroke(255, 255, 0); // 黄色
+      strokeWeight(5);
+    } else {
+      stroke(255); // 白色
+      strokeWeight(3);
+    }
+    
     noFill();
     rect(snap.x, snap.y, snap.w, snap.h);
     image(snap.img, snap.x, snap.y);
@@ -201,13 +215,14 @@ function gotHands(results) {
 }
 
 // ==============================
-// 🖱️ 交互逻辑 (兼容鼠标 & 触摸)
+// 🖱️ 交互逻辑 (强力修正版)
 // ==============================
 
 // 统一处理点击/触摸开始
 function handleInputStart() {
   let inputX = mouseX;
-  // 前置摄像头时，输入坐标需要镜像翻转
+  
+  // 修正坐标：前置摄像头时，输入坐标需要镜像翻转
   if (usingFrontCamera) {
     inputX = width - mouseX; 
   }
@@ -216,8 +231,10 @@ function handleInputStart() {
   // 倒序检查（优先选中最上面的图）
   for (let i = snapshots.length - 1; i >= 0; i--) {
     let s = snapshots[i];
-    if (inputX > s.x && inputX < s.x + s.w &&
-        inputY > s.y && inputY < s.y + s.h) {
+    
+    // 稍微扩大一点点击范围 (+10px)，方便手指点击
+    if (inputX > s.x - 10 && inputX < s.x + s.w + 10 &&
+        inputY > s.y - 10 && inputY < s.y + s.h + 10) {
       
       draggedSnapshot = s;
       dragOffsetX = inputX - s.x;
@@ -245,7 +262,7 @@ function handleInputMove() {
     draggedSnapshot.x = inputX - dragOffsetX;
     draggedSnapshot.y = inputY - dragOffsetY;
     
-    return false; // 重要：防止拖拽时滚动页面
+    return false; // 防止拖拽时滚动页面
   }
 }
 
@@ -254,14 +271,10 @@ function handleInputEnd() {
   return false;
 }
 
-// --- P5.js 事件映射 ---
-
-// 鼠标事件
+// 绑定 p5.js 的事件
 function mousePressed() { return handleInputStart(); }
 function mouseDragged() { return handleInputMove(); }
 function mouseReleased() { return handleInputEnd(); }
-
-// 触摸事件 (手机端核心)
 function touchStarted() { return handleInputStart(); }
 function touchMoved() { return handleInputMove(); }
 function touchEnded() { return handleInputEnd(); }
@@ -280,8 +293,8 @@ function styleButton(btn) {
   btn.style('border-radius', '20px');
   btn.style('box-shadow', '0 2px 5px rgba(0,0,0,0.3)');
   btn.style('font-weight', 'bold');
-  // 这一行也很重要，防止双击放大
   btn.style('touch-action', 'manipulation'); 
+  btn.style('z-index', '100'); // 确保按钮在最上层
 }
 
 function savePicture() {
