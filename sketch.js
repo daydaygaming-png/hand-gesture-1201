@@ -1,6 +1,6 @@
 /*
- * * 📱 Ultimate Pro: 手勢定格 + 完美拖拽 + 清空功能
- * * 新增：右上角 CLEAR 按鈕，一鍵清空畫布
+ * * 📱 True Final: 软切换(不刷新) + 独立清空
+ * * 功能：切换镜头保留作品，清空按钮独立工作
  */
 
 let handPose;
@@ -8,117 +8,130 @@ let video;
 let hands = [];
 let snapshots = []; 
 
-// 交互狀態
+// 交互变量
 let hoverStartTime = 0;
 let isHovering = false;
 let hasSnapped = false;
 let lastCenterX = 0;
 let lastCenterY = 0;
 
-// 拖拽變量
+// 拖拽变量
 let draggedSnapshot = null;
 let dragOffsetX = 0;
 let dragOffsetY = 0;
 
-// ⚙️ 參數
-let totalTime = 500;   // 定格時間
-let margin = 35;       // 手指避讓
+// ⚙️ 参数
+let totalTime = 500;   // 定格时间
+let margin = 35;       // 手指避让
 
-// 📷 攝像頭控制
+// 📷 摄像头控制
 let usingFrontCamera = true; 
+let isCameraSwitching = false; // 标记是否正在切换中
 let switchBtn;
+let clearBtn;
 let saveBtn;
-let clearBtn; // 新增：清空按鈕變量
 
 function preload() {
   handPose = ml5.handPose();
 }
 
 function setup() {
-  // 1. 創建畫布
   let c = createCanvas(windowWidth, windowHeight);
   pixelDensity(1);
 
-  // --- 🔒 核彈級防滾動設置 ---
+  // 防滚动
   c.elt.addEventListener("touchmove", function(event) {
     event.preventDefault();
   }, { passive: false });
-  
   c.elt.style.touchAction = "none"; 
   document.body.style.overflow = "hidden"; 
 
-  // --- URL 參數檢測 ---
-  let params = getURLParams();
-  let camMode = 'user'; 
+  // 初始化摄像头
+  initCamera();
 
-  if (params.cam === 'environment') {
-    camMode = 'environment';
-    usingFrontCamera = false;
-  } else {
-    camMode = 'user';
-    usingFrontCamera = true;
-  }
+  // --- UI 按钮 ---
 
-  // --- 啟動攝像頭 ---
-  let constraints = {
-    audio: false,
-    video: {
-      facingMode: camMode,
-      width: { ideal: 1280 },
-      height: { ideal: 720 }
-    }
-  };
-
-  video = createCapture(constraints, function(stream) {
-    console.log("攝像頭啟動: " + camMode);
-    handPose.detectStart(video, gotHands);
-  });
-
-  video.elt.setAttribute('playsinline', '');
-  video.size(width, height);
-  video.hide();
-
-  // --- UI 按鈕區域 ---
-  
-  // 1. 左上角：切換鏡頭
+  // 1. 切换按钮 (Switch)
   switchBtn = createButton('🔄 SWITCH');
   switchBtn.position(20, 20);
-  switchBtn.mousePressed(switchCameraByReload); 
+  switchBtn.mousePressed(toggleCamera); 
   styleButton(switchBtn);
 
-  // 2. 右上角：清空畫布 (新增)
+  // 2. 清空按钮 (Clear)
   clearBtn = createButton('CLEAR');
-  clearBtn.position(width - 100, 20); // 放在右上角
+  clearBtn.position(width - 100, 20);
   clearBtn.mousePressed(clearAllSnapshots);
   styleButton(clearBtn);
-  // 給清空按鈕加個紅色文字提示危險操作 (可選)
-  clearBtn.style('color', '#d9534f'); 
+  clearBtn.style('color', '#d9534f'); // 红色警告色
 
-  // 3. 底部居中：下載
+  // 3. 下载按钮 (Download)
   saveBtn = createButton('⬇️ DOWNLOAD');
   saveBtn.position(width / 2 - 75, height - 80);
   saveBtn.mousePressed(savePicture);
   styleButton(saveBtn);
 }
 
-// --- 新增功能：清空所有照片 ---
+// --- 清空功能 ---
 function clearAllSnapshots() {
   snapshots = [];
-  draggedSnapshot = null; // 確保沒有殘留的拖拽狀態
+  draggedSnapshot = null;
 }
 
-function switchCameraByReload() {
-  let nextMode = usingFrontCamera ? 'environment' : 'user';
-  let currentUrl = window.location.href.split('?')[0];
-  window.location.href = currentUrl + "?cam=" + nextMode;
+// --- 摄像头软切换逻辑 ---
+function toggleCamera() {
+  // 如果正在切换中，防止重复点击
+  if (isCameraSwitching) return;
+  isCameraSwitching = true;
+  switchBtn.html('⌛...'); // 按钮变文字提示
+
+  // 1. 先停止当前视频
+  if (video) {
+    let stream = video.elt.srcObject;
+    if (stream) {
+      let tracks = stream.getTracks();
+      tracks.forEach(track => track.stop());
+    }
+    video.remove();
+    video = null;
+  }
+
+  // 2. 切换模式
+  usingFrontCamera = !usingFrontCamera;
+
+  // 3. 【关键】等待 500毫秒再请求新摄像头
+  // 给浏览器一点喘息时间，防止硬件锁死
+  setTimeout(() => {
+    initCamera();
+    isCameraSwitching = false;
+    switchBtn.html('🔄 SWITCH'); // 恢复按钮文字
+  }, 500); 
+}
+
+function initCamera() {
+  let constraints = {
+    audio: false,
+    video: {
+      facingMode: usingFrontCamera ? "user" : "environment",
+      width: { ideal: 1280 },
+      height: { ideal: 720 }
+    }
+  };
+
+  video = createCapture(constraints, function(stream) {
+    console.log("摄像头启动成功");
+    handPose.detectStart(video, gotHands);
+  });
+
+  video.elt.setAttribute('playsinline', '');
+  video.size(width, height);
+  video.hide();
 }
 
 function draw() {
   background(0); 
-  
   push();
   
-  // 智能鏡像
+  // 智能镜像
   if (usingFrontCamera) {
     translate(width, 0); 
     scale(-1, 1);
@@ -127,16 +140,14 @@ function draw() {
     scale(1, 1);
   }
   
-  // 1. 背景視頻
+  // 1. 背景视频
   if (video) {
     image(video, 0, 0, width, height);
   }
 
-  // 2. 照片
+  // 2. 照片 (遍历显示)
   for (let i = 0; i < snapshots.length; i++) {
     let snap = snapshots[i];
-    
-    // 選中狀態顯示黃框
     if (snap === draggedSnapshot) {
       stroke(255, 255, 0); 
       strokeWeight(5);
@@ -144,13 +155,12 @@ function draw() {
       stroke(255); 
       strokeWeight(3);
     }
-    
     noFill();
     rect(snap.x, snap.y, snap.w, snap.h);
     image(snap.img, snap.x, snap.y);
   }
 
-  // 3. 手勢識別
+  // 3. 手势识别
   if (hands.length > 0) {
     let hand = hands[0];
     let thumb = hand.keypoints[4];
@@ -173,7 +183,7 @@ function draw() {
     let currentCenterY = y + h / 2;
     let movement = dist(currentCenterX, currentCenterY, lastCenterX, lastCenterY);
     
-    // 定格觸發
+    // 定格触发
     if (draggedSnapshot === null && movement < 8 && w > 20 && h > 20) {
       if (!isHovering) {
         hoverStartTime = millis();
@@ -188,7 +198,7 @@ function draw() {
     lastCenterX = currentCenterX;
     lastCenterY = currentCenterY;
 
-    // 視覺反饋
+    // 视觉反馈
     if (isHovering) {
       let elapsedTime = millis() - hoverStartTime;
       let progress = constrain(elapsedTime / totalTime, 0, 1);
@@ -231,10 +241,7 @@ function gotHands(results) {
   hands = results;
 }
 
-// ==============================
-// 🖱️ 交互邏輯
-// ==============================
-
+// 交互逻辑
 function handleInputStart() {
   let inputX = mouseX;
   if (usingFrontCamera) {
@@ -246,14 +253,11 @@ function handleInputStart() {
     let s = snapshots[i];
     if (inputX > s.x - 10 && inputX < s.x + s.w + 10 &&
         inputY > s.y - 10 && inputY < s.y + s.h + 10) {
-      
       draggedSnapshot = s;
       dragOffsetX = inputX - s.x;
       dragOffsetY = inputY - s.y;
-      
       snapshots.splice(i, 1);
       snapshots.push(s);
-      
       return false; 
     }
   }
@@ -267,10 +271,8 @@ function handleInputMove() {
       inputX = width - mouseX;
     }
     let inputY = mouseY;
-
     draggedSnapshot.x = inputX - dragOffsetX;
     draggedSnapshot.y = inputY - dragOffsetY;
-    
     return false; 
   }
 }
@@ -287,13 +289,9 @@ function touchStarted() { return handleInputStart(); }
 function touchMoved() { return handleInputMove(); }
 function touchEnded() { return handleInputEnd(); }
 
-
-// ==============================
-// 🎨 樣式與輔助
-// ==============================
-
+// UI 样式
 function styleButton(btn) {
-  btn.style('font-size', '14px'); // 字稍微改小一點點，避免遮擋太多
+  btn.style('font-size', '14px');
   btn.style('padding', '10px 15px');
   btn.style('background-color', 'white');
   btn.style('color', '#333');
@@ -311,17 +309,7 @@ function savePicture() {
 
 function windowResized() {
   resizeCanvas(windowWidth, windowHeight);
-  // 重新定位所有按鈕
   if(saveBtn) saveBtn.position(width / 2 - 75, height - 80);
   if(clearBtn) clearBtn.position(width - 100, 20);
   if(switchBtn) switchBtn.position(20, 20);
-}
-
-// 輔助函數：獲取 URL 參數
-function getURLParams() {
-  let params = {};
-  let parts = window.location.href.replace(/[?&]+([^=&]+)=([^&]*)/gi, function(m,key,value) {
-    params[key] = value;
-  });
-  return params;
 }
