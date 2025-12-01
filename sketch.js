@@ -1,6 +1,6 @@
 /*
- * * 📱 手机版 Ultimate：手势定格 + 拖拽 + 切换前后摄
- * * 功能：全屏适配 + 智能镜像(前置镜/后置不镜) + 1秒定格 + 拖拽 + 下载
+ * * 📱 手机版 Ultimate Fix：修复手势识别问题
+ * * 核心修复：调整了 detectStart 的触发时机，确保摄像头准备好后再识别
  */
 
 // --- 1. 全局变量 ---
@@ -22,7 +22,7 @@ let dragOffsetX = 0;
 let dragOffsetY = 0;
 
 // ⚙️ 参数设置
-let totalTime = 500;   // 定格时间：500毫秒 (0.5秒)
+let totalTime = 500;   // 定格时间
 let margin = 35;       // 手指避让距离
 
 // 📷 摄像头状态
@@ -42,70 +42,65 @@ function setup() {
   initCamera();
 
   // --- 创建 UI 按钮 ---
-  
-  // 1. 切换摄像头按钮 (放在左上角)
   switchBtn = createButton('🔄 切换镜头');
   switchBtn.position(20, 20);
   switchBtn.mousePressed(toggleCamera);
   styleButton(switchBtn);
 
-  // 2. 下载按钮 (放在底部居中)
   saveBtn = createButton('⬇️ DOWNLOAD');
   saveBtn.position(width / 2 - 75, height - 80);
   saveBtn.mousePressed(savePicture);
   styleButton(saveBtn);
 }
 
-// --- 初始化/重置摄像头的核心函数 ---
+// --- 【核心修复】初始化/重置摄像头 ---
 function initCamera() {
-  // 如果已经有视频在运行，先停止它 (防止手机发热/占用)
+  // 1. 如果旧视频存在，先停止并移除，防止内存泄漏
   if (video) {
-    video.remove(); // 移除 DOM 元素
+    video.remove();
     video = null;
   }
 
   let constraints = {
     audio: false,
     video: {
-      // 根据状态切换 facingMode
       facingMode: usingFrontCamera ? "user" : "environment",
       width: { ideal: 1280 },
       height: { ideal: 720 }
     }
   };
 
+  // 2. 创建摄像头，注意这里加了一个 callback 回调函数
   video = createCapture(constraints, function(stream) {
-    // 摄像头准备好后的回调
-    console.log("Camera started");
+    console.log("摄像头流已就绪");
+    
+    // 3. 【重要】只有在这里（摄像头成功启动后）才开始让 AI 识别
+    // 这样能防止 AI 在黑屏时就尝试工作而报错
+    handPose.detectStart(video, gotHands);
   });
   
   video.elt.setAttribute('playsinline', '');
   video.size(width, height);
   video.hide();
-
-  // 重新绑定手势识别到新的视频流
-  handPose.detectStart(video, gotHands);
 }
 
 // 切换摄像头逻辑
 function toggleCamera() {
-  usingFrontCamera = !usingFrontCamera; // 切换状态
-  snapshots = []; // (可选) 切换镜头时清空画布，防止视角混乱，如不想清空可注释掉这行
-  initCamera();   // 重启摄像头
+  usingFrontCamera = !usingFrontCamera; 
+  // snapshots = []; // 切换时不清除照片，保留创作
+  initCamera();   
 }
 
 function draw() {
-  background(0); // 黑色背景防闪烁
+  background(0); 
   
   // --- 智能镜像处理 ---
   push();
   
   if (usingFrontCamera) {
-    // 前置：启用镜像 (原点移到右上角，x轴翻转)
     translate(width, 0); 
     scale(-1, 1);
   } else {
-    // 后置：正常显示 (不需要翻转)
     translate(0, 0);
     scale(1, 1);
   }
@@ -130,7 +125,6 @@ function draw() {
     let thumb = hand.keypoints[4];
     let index = hand.keypoints[8];
 
-    // 坐标计算
     let rawX = min(thumb.x, index.x);
     let rawY = min(thumb.y, index.y);
     let rawW = abs(thumb.x - index.x);
@@ -199,23 +193,21 @@ function draw() {
     }
   }
   
-  pop(); // 结束镜像/正常变换区域
+  pop(); 
 }
 
 function gotHands(results) {
   hands = results;
 }
 
-// --- 触摸拖拽逻辑 (需适配镜像状态) ---
+// --- 触摸拖拽逻辑 ---
 function mousePressed() {
-  // 根据摄像头模式，决定鼠标X轴是否需要翻转
   let inputX = mouseX;
   if (usingFrontCamera) {
-    inputX = width - mouseX; // 镜像翻转坐标
+    inputX = width - mouseX; 
   }
   let inputY = mouseY;
 
-  // 倒序检查点击
   for (let i = snapshots.length - 1; i >= 0; i--) {
     let s = snapshots[i];
     if (inputX > s.x && inputX < s.x + s.w &&
@@ -225,7 +217,6 @@ function mousePressed() {
       dragOffsetX = inputX - s.x;
       dragOffsetY = inputY - s.y;
       
-      // 置顶
       snapshots.splice(i, 1);
       snapshots.push(s);
       
@@ -253,7 +244,6 @@ function mouseReleased() {
   draggedSnapshot = null;
 }
 
-// 辅助函数：统一按钮样式
 function styleButton(btn) {
   btn.style('font-size', '16px');
   btn.style('padding', '10px 20px');
@@ -272,7 +262,6 @@ function savePicture() {
 
 function windowResized() {
   resizeCanvas(windowWidth, windowHeight);
-  // 重新定位底部按钮，顶部按钮不用动
   if(saveBtn) saveBtn.position(width / 2 - 75, height - 80);
   if(video) video.size(windowWidth, windowHeight);
 }
