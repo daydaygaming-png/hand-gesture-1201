@@ -1,6 +1,6 @@
 /*
- * * 📱 Ultimate Stable: 刷新式切换 + 默认前置
- * * 核心：利用网页刷新来清理摄像头占用，解决手势识别卡死问题
+ * * 📱 Ultimate Final: 刷新切换 + 完美拖拽
+ * * 修复：添加 touch-action: none 防止浏览器滚动干扰拖拽
  */
 
 let handPose;
@@ -25,7 +25,7 @@ let totalTime = 500;   // 定格时间
 let margin = 35;       // 手指避让
 
 // 📷 摄像头控制
-let usingFrontCamera = true; // 标记当前是不是前置
+let usingFrontCamera = true; 
 let switchBtn;
 let saveBtn;
 
@@ -34,15 +34,18 @@ function preload() {
 }
 
 function setup() {
-  createCanvas(windowWidth, windowHeight);
+  // 1. 创建画布并赋值给变量 c，方便设置样式
+  let c = createCanvas(windowWidth, windowHeight);
   pixelDensity(1);
 
-  // --- 1. 核心逻辑：检查 URL 参数决定开哪个摄像头 ---
-  // 这种方式最稳定，每次都是全新的开始
-  let params = getURLParams();
-  let camMode = 'user'; // 默认：user (前置)
+  // 【关键修复】禁止浏览器默认的“滚动”和“下拉刷新”行为
+  // 这样你的手指拖拽图片时，页面才不会跟着动
+  c.style('touch-action', 'none'); 
 
-  // 如果网址里写了 ?cam=environment，那就开后置
+  // --- URL 参数检测 ---
+  let params = getURLParams();
+  let camMode = 'user'; 
+
   if (params.cam === 'environment') {
     camMode = 'environment';
     usingFrontCamera = false;
@@ -51,7 +54,7 @@ function setup() {
     usingFrontCamera = true;
   }
 
-  // --- 2. 启动摄像头 ---
+  // --- 启动摄像头 ---
   let constraints = {
     audio: false,
     video: {
@@ -62,8 +65,7 @@ function setup() {
   };
 
   video = createCapture(constraints, function(stream) {
-    console.log("摄像头启动成功: " + camMode);
-    // 只有启动成功才开始识别
+    console.log("摄像头启动: " + camMode);
     handPose.detectStart(video, gotHands);
   });
 
@@ -71,10 +73,10 @@ function setup() {
   video.size(width, height);
   video.hide();
 
-  // --- 3. UI 按钮 ---
+  // --- UI 按钮 ---
   switchBtn = createButton('🔄 刷新切换');
   switchBtn.position(20, 20);
-  switchBtn.mousePressed(switchCameraByReload); // 绑定新的切换函数
+  switchBtn.mousePressed(switchCameraByReload); 
   styleButton(switchBtn);
 
   saveBtn = createButton('⬇️ DOWNLOAD');
@@ -83,13 +85,8 @@ function setup() {
   styleButton(saveBtn);
 }
 
-// --- ♻️ 新的切换逻辑：刷新网页 ---
 function switchCameraByReload() {
-  // 如果当前是前置，就去后置；反之亦然
   let nextMode = usingFrontCamera ? 'environment' : 'user';
-  
-  // 修改 URL 并刷新页面
-  // 例如：index.html?cam=environment
   let currentUrl = window.location.href.split('?')[0];
   window.location.href = currentUrl + "?cam=" + nextMode;
 }
@@ -99,7 +96,7 @@ function draw() {
   
   push();
   
-  // 智能镜像：只有前置摄像头镜像
+  // 智能镜像
   if (usingFrontCamera) {
     translate(width, 0); 
     scale(-1, 1);
@@ -108,12 +105,12 @@ function draw() {
     scale(1, 1);
   }
   
-  // 1. 画背景视频
+  // 1. 背景视频
   if (video) {
     image(video, 0, 0, width, height);
   }
 
-  // 2. 画出所有照片
+  // 2. 照片
   for (let snap of snapshots) {
     stroke(255);
     strokeWeight(3);
@@ -122,7 +119,7 @@ function draw() {
     image(snap.img, snap.x, snap.y);
   }
 
-  // 3. 手势识别逻辑
+  // 3. 手势识别
   if (hands.length > 0) {
     let hand = hands[0];
     let thumb = hand.keypoints[4];
@@ -145,7 +142,7 @@ function draw() {
     let currentCenterY = y + h / 2;
     let movement = dist(currentCenterX, currentCenterY, lastCenterX, lastCenterY);
     
-    // 定格触发
+    // 只有没在拖拽时才触发定格
     if (draggedSnapshot === null && movement < 8 && w > 20 && h > 20) {
       if (!isHovering) {
         hoverStartTime = millis();
@@ -203,44 +200,76 @@ function gotHands(results) {
   hands = results;
 }
 
-// --- 触摸拖拽逻辑 ---
-function mousePressed() {
+// ==============================
+// 🖱️ 交互逻辑 (兼容鼠标 & 触摸)
+// ==============================
+
+// 统一处理点击/触摸开始
+function handleInputStart() {
   let inputX = mouseX;
+  // 前置摄像头时，输入坐标需要镜像翻转
   if (usingFrontCamera) {
     inputX = width - mouseX; 
   }
   let inputY = mouseY;
 
+  // 倒序检查（优先选中最上面的图）
   for (let i = snapshots.length - 1; i >= 0; i--) {
     let s = snapshots[i];
     if (inputX > s.x && inputX < s.x + s.w &&
         inputY > s.y && inputY < s.y + s.h) {
+      
       draggedSnapshot = s;
       dragOffsetX = inputX - s.x;
       dragOffsetY = inputY - s.y;
+      
+      // 置顶
       snapshots.splice(i, 1);
       snapshots.push(s);
-      return false; 
+      
+      return false; // 阻止默认行为
     }
   }
+  return false;
 }
 
-function mouseDragged() {
+// 统一处理拖拽/移动
+function handleInputMove() {
   if (draggedSnapshot) {
     let inputX = mouseX;
     if (usingFrontCamera) {
       inputX = width - mouseX;
     }
     let inputY = mouseY;
+
     draggedSnapshot.x = inputX - dragOffsetX;
     draggedSnapshot.y = inputY - dragOffsetY;
-    return false; 
+    
+    return false; // 重要：防止拖拽时滚动页面
   }
 }
 
-function mouseReleased() {
+function handleInputEnd() {
   draggedSnapshot = null;
+  return false;
 }
+
+// --- P5.js 事件映射 ---
+
+// 鼠标事件
+function mousePressed() { return handleInputStart(); }
+function mouseDragged() { return handleInputMove(); }
+function mouseReleased() { return handleInputEnd(); }
+
+// 触摸事件 (手机端核心)
+function touchStarted() { return handleInputStart(); }
+function touchMoved() { return handleInputMove(); }
+function touchEnded() { return handleInputEnd(); }
+
+
+// ==============================
+// 🎨 样式与辅助
+// ==============================
 
 function styleButton(btn) {
   btn.style('font-size', '16px');
@@ -251,7 +280,8 @@ function styleButton(btn) {
   btn.style('border-radius', '20px');
   btn.style('box-shadow', '0 2px 5px rgba(0,0,0,0.3)');
   btn.style('font-weight', 'bold');
-  btn.style('touch-action', 'manipulation');
+  // 这一行也很重要，防止双击放大
+  btn.style('touch-action', 'manipulation'); 
 }
 
 function savePicture() {
@@ -261,4 +291,13 @@ function savePicture() {
 function windowResized() {
   resizeCanvas(windowWidth, windowHeight);
   if(saveBtn) saveBtn.position(width / 2 - 75, height - 80);
+}
+
+// 辅助函数：获取 URL 参数
+function getURLParams() {
+  let params = {};
+  let parts = window.location.href.replace(/[?&]+([^=&]+)=([^&]*)/gi, function(m,key,value) {
+    params[key] = value;
+  });
+  return params;
 }
