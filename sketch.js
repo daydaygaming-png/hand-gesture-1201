@@ -1,89 +1,121 @@
 /*
- * * 📱 手机版：手势定格拼贴工具
- * * 功能：全屏适配 + iOS兼容 + 前置镜头 + 1秒定格 + 手指避让
+ * * 📱 手机版 Ultimate：手势定格 + 拖拽 + 切换前后摄
+ * * 功能：全屏适配 + 智能镜像(前置镜/后置不镜) + 1秒定格 + 拖拽 + 下载
  */
 
-// --- 1. 全局变量声明 ---
+// --- 1. 全局变量 ---
 let handPose;
 let video;
 let hands = [];
-let snapshots = []; // 存储定格画面
+let snapshots = []; 
 
-// 交互逻辑变量
+// 交互状态
 let hoverStartTime = 0;
 let isHovering = false;
 let hasSnapped = false;
 let lastCenterX = 0;
 let lastCenterY = 0;
 
-// 参数设置
-let totalTime = 1000; // 定格等待时间：1秒
-let margin = 35;      // 手指避让距离：35像素
+// 拖拽变量
+let draggedSnapshot = null;
+let dragOffsetX = 0;
+let dragOffsetY = 0;
 
-// 按钮变量
+// ⚙️ 参数设置
+let totalTime = 500;   // 定格时间：500毫秒 (0.5秒)
+let margin = 35;       // 手指避让距离
+
+// 📷 摄像头状态
+let usingFrontCamera = true; // 默认为前置
+let switchBtn;
 let saveBtn;
 
 function preload() {
-  // 加载模型
   handPose = ml5.handPose();
 }
 
 function setup() {
-  // --- 适配手机屏幕尺寸 ---
   createCanvas(windowWidth, windowHeight);
-  // 手机屏幕像素密度高，设为1可以防卡顿并提升性能
   pixelDensity(1);
 
-  // --- 摄像头设置 ---
+  // 初始化摄像头
+  initCamera();
+
+  // --- 创建 UI 按钮 ---
+  
+  // 1. 切换摄像头按钮 (放在左上角)
+  switchBtn = createButton('🔄 切换镜头');
+  switchBtn.position(20, 20);
+  switchBtn.mousePressed(toggleCamera);
+  styleButton(switchBtn);
+
+  // 2. 下载按钮 (放在底部居中)
+  saveBtn = createButton('⬇️ DOWNLOAD');
+  saveBtn.position(width / 2 - 75, height - 80);
+  saveBtn.mousePressed(savePicture);
+  styleButton(saveBtn);
+}
+
+// --- 初始化/重置摄像头的核心函数 ---
+function initCamera() {
+  // 如果已经有视频在运行，先停止它 (防止手机发热/占用)
+  if (video) {
+    video.remove(); // 移除 DOM 元素
+    video = null;
+  }
+
   let constraints = {
     audio: false,
     video: {
-      facingMode: "user", // 强制使用前置摄像头
-      // 请求适合手机的分辨率 (浏览器会自动调整)
+      // 根据状态切换 facingMode
+      facingMode: usingFrontCamera ? "user" : "environment",
       width: { ideal: 1280 },
       height: { ideal: 720 }
     }
   };
 
-  video = createCapture(constraints);
+  video = createCapture(constraints, function(stream) {
+    // 摄像头准备好后的回调
+    console.log("Camera started");
+  });
   
-  // 【关键】解决 iOS Safari 视频黑屏或自动全屏问题
-  video.elt.setAttribute('playsinline', ''); 
-  
-  video.size(width, height); 
+  video.elt.setAttribute('playsinline', '');
+  video.size(width, height);
   video.hide();
-  
-  // 开始检测
-  handPose.detectStart(video, gotHands);
 
-  // --- 创建适合手机按的下载按钮 ---
-  saveBtn = createButton('⬇️ DOWNLOAD');
-  // 居中放在底部 (留出 80px 空间)
-  saveBtn.position(width / 2 - 75, height - 80); 
-  saveBtn.mousePressed(savePicture);
-  
-  // 手机端按钮样式优化
-  saveBtn.style('font-size', '16px');
-  saveBtn.style('padding', '12px 30px');
-  saveBtn.style('background-color', 'white');
-  saveBtn.style('color', '#333');
-  saveBtn.style('border', 'none');
-  saveBtn.style('border-radius', '30px'); // 圆角
-  saveBtn.style('box-shadow', '0 4px 10px rgba(0,0,0,0.3)'); // 阴影
-  saveBtn.style('font-weight', 'bold');
-  saveBtn.style('touch-action', 'manipulation'); // 优化点击反应
+  // 重新绑定手势识别到新的视频流
+  handPose.detectStart(video, gotHands);
+}
+
+// 切换摄像头逻辑
+function toggleCamera() {
+  usingFrontCamera = !usingFrontCamera; // 切换状态
+  snapshots = []; // (可选) 切换镜头时清空画布，防止视角混乱，如不想清空可注释掉这行
+  initCamera();   // 重启摄像头
 }
 
 function draw() {
-  // --- 2. 镜像翻转处理 ---
-  push(); 
-  translate(width, 0); 
-  scale(-1, 1);       
+  background(0); // 黑色背景防闪烁
   
-  // --- 3. 绘制背景视频 (拉伸填满屏幕) ---
-  image(video, 0, 0, width, height);
+  // --- 智能镜像处理 ---
+  push();
+  
+  if (usingFrontCamera) {
+    // 前置：启用镜像 (原点移到右上角，x轴翻转)
+    translate(width, 0); 
+    scale(-1, 1);
+  } else {
+    // 后置：正常显示 (不需要翻转)
+    translate(0, 0);
+    scale(1, 1);
+  }
+  
+  // 1. 画背景视频
+  if (video) {
+    image(video, 0, 0, width, height);
+  }
 
-  // --- 4. 绘制已定格的照片 ---
+  // 2. 画出所有照片
   for (let snap of snapshots) {
     stroke(255);
     strokeWeight(3);
@@ -92,37 +124,32 @@ function draw() {
     image(snap.img, snap.x, snap.y);
   }
 
-  // --- 5. 手势核心逻辑 ---
+  // 3. 手势识别逻辑
   if (hands.length > 0) {
     let hand = hands[0];
-    let thumb = hand.keypoints[4]; // 大拇指尖
-    let index = hand.keypoints[8]; // 食指尖
+    let thumb = hand.keypoints[4];
+    let index = hand.keypoints[8];
 
-    // A. 计算原始手指构成的矩形
+    // 坐标计算
     let rawX = min(thumb.x, index.x);
     let rawY = min(thumb.y, index.y);
     let rawW = abs(thumb.x - index.x);
     let rawH = abs(thumb.y - index.y);
 
-    // B. 计算避让手指后的实际截图矩形
     let x = rawX + margin;
     let y = rawY + margin;
     let w = rawW - margin * 2;
     let h = rawH - margin * 2;
 
-    // 防止矩形太小出现负数
     if (w < 0) w = 0;
     if (h < 0) h = 0;
     
-    // 计算中心点用于检测抖动
     let currentCenterX = x + w / 2;
     let currentCenterY = y + h / 2;
-
-    // C. 检测手势是否稳定
     let movement = dist(currentCenterX, currentCenterY, lastCenterX, lastCenterY);
     
-    // 只有当框足够大(w>20)且稳定时才进入倒计时
-    if (movement < 8 && w > 20 && h > 20) { // 手机上稍微放宽移动阈值到8
+    // 定格触发逻辑
+    if (draggedSnapshot === null && movement < 8 && w > 20 && h > 20) {
       if (!isHovering) {
         hoverStartTime = millis();
         isHovering = true;
@@ -136,28 +163,21 @@ function draw() {
     lastCenterX = currentCenterX;
     lastCenterY = currentCenterY;
 
-    // D. 视觉反馈与截图执行
+    // 视觉反馈
     if (isHovering) {
-      // 计算进度
       let elapsedTime = millis() - hoverStartTime;
       let progress = constrain(elapsedTime / totalTime, 0, 1);
-
-      // 颜色从红变绿
       let r = map(progress, 0, 1, 255, 0);
       let g = map(progress, 0, 1, 0, 255);
       
-      // 画取景框
       stroke(r, g, 0);
       strokeWeight(4);
       noFill();
       rect(x, y, w, h);
-      
-      // 画顶部进度条
       noStroke();
       fill(r, g, 0);
-      rect(x, y - 15, w * progress, 8); // 手机上进度条稍微粗一点
+      rect(x, y - 15, w * progress, 8); 
 
-      // E. 时间到 -> 截图
       if (elapsedTime > totalTime && !hasSnapped) {
         if (w > 0 && h > 0) {
           let capturedImage = video.get(x, y, w, h);
@@ -171,32 +191,88 @@ function draw() {
           hasSnapped = true; 
         }
       }
-    } else {
-      // 不稳定状态：显示红色细框
-      if (w > 0 && h > 0) {
-        stroke(255, 0, 0);
-        strokeWeight(1);
-        noFill();
-        rect(x, y, w, h);
-      }
+    } else if (draggedSnapshot === null && w > 0 && h > 0) {
+       stroke(255, 0, 0);
+       strokeWeight(1);
+       noFill();
+       rect(x, y, w, h);
     }
   }
   
-  pop(); // 结束镜像区域
+  pop(); // 结束镜像/正常变换区域
 }
 
 function gotHands(results) {
   hands = results;
 }
 
-function savePicture() {
-  saveCanvas('my_mobile_collage', 'jpg');
+// --- 触摸拖拽逻辑 (需适配镜像状态) ---
+function mousePressed() {
+  // 根据摄像头模式，决定鼠标X轴是否需要翻转
+  let inputX = mouseX;
+  if (usingFrontCamera) {
+    inputX = width - mouseX; // 镜像翻转坐标
+  }
+  let inputY = mouseY;
+
+  // 倒序检查点击
+  for (let i = snapshots.length - 1; i >= 0; i--) {
+    let s = snapshots[i];
+    if (inputX > s.x && inputX < s.x + s.w &&
+        inputY > s.y && inputY < s.y + s.h) {
+      
+      draggedSnapshot = s;
+      dragOffsetX = inputX - s.x;
+      dragOffsetY = inputY - s.y;
+      
+      // 置顶
+      snapshots.splice(i, 1);
+      snapshots.push(s);
+      
+      return false; 
+    }
+  }
 }
 
-// 手机旋转屏幕时自动调整
+function mouseDragged() {
+  if (draggedSnapshot) {
+    let inputX = mouseX;
+    if (usingFrontCamera) {
+      inputX = width - mouseX;
+    }
+    let inputY = mouseY;
+
+    draggedSnapshot.x = inputX - dragOffsetX;
+    draggedSnapshot.y = inputY - dragOffsetY;
+    
+    return false; 
+  }
+}
+
+function mouseReleased() {
+  draggedSnapshot = null;
+}
+
+// 辅助函数：统一按钮样式
+function styleButton(btn) {
+  btn.style('font-size', '16px');
+  btn.style('padding', '10px 20px');
+  btn.style('background-color', 'white');
+  btn.style('color', '#333');
+  btn.style('border', 'none');
+  btn.style('border-radius', '20px');
+  btn.style('box-shadow', '0 2px 5px rgba(0,0,0,0.3)');
+  btn.style('font-weight', 'bold');
+  btn.style('touch-action', 'manipulation');
+}
+
+function savePicture() {
+  saveCanvas('my_collage', 'jpg');
+}
+
 function windowResized() {
   resizeCanvas(windowWidth, windowHeight);
-  video.size(windowWidth, windowHeight);
-  // 重新定位按钮
+  // 重新定位底部按钮，顶部按钮不用动
   if(saveBtn) saveBtn.position(width / 2 - 75, height - 80);
+  if(video) video.size(windowWidth, windowHeight);
 }
