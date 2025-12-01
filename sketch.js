@@ -1,6 +1,6 @@
 /*
- * * 📱 手机版 Ultimate Fix：修复手势识别问题
- * * 核心修复：调整了 detectStart 的触发时机，确保摄像头准备好后再识别
+ * * 📱 手机版 Final Fix：强制释放摄像头资源
+ * * 核心修复：切换前强制 .stop() 所有视频流，防止硬件死锁
  */
 
 // --- 1. 全局变量 ---
@@ -53,13 +53,26 @@ function setup() {
   styleButton(saveBtn);
 }
 
-// --- 【核心修复】初始化/重置摄像头 ---
-function initCamera() {
-  // 1. 如果旧视频存在，先停止并移除，防止内存泄漏
+// --- 辅助函数：彻底停止当前视频流 ---
+function stopCurrentVideo() {
   if (video) {
+    // 1. 获取视频流
+    let stream = video.elt.srcObject;
+    // 2. 如果流存在，遍历所有轨道并强制停止
+    if (stream) {
+      let tracks = stream.getTracks();
+      tracks.forEach(track => track.stop());
+    }
+    // 3. 移除 DOM 元素
     video.remove();
     video = null;
   }
+}
+
+// --- 初始化摄像头 ---
+function initCamera() {
+  // 先彻底杀掉旧视频
+  stopCurrentVideo();
 
   let constraints = {
     audio: false,
@@ -70,12 +83,10 @@ function initCamera() {
     }
   };
 
-  // 2. 创建摄像头，注意这里加了一个 callback 回调函数
+  // 创建新视频
   video = createCapture(constraints, function(stream) {
-    console.log("摄像头流已就绪");
-    
-    // 3. 【重要】只有在这里（摄像头成功启动后）才开始让 AI 识别
-    // 这样能防止 AI 在黑屏时就尝试工作而报错
+    console.log("新摄像头已启动");
+    // 只有在新摄像头成功启动后，才重新连接手势识别
     handPose.detectStart(video, gotHands);
   });
   
@@ -87,16 +98,15 @@ function initCamera() {
 // 切换摄像头逻辑
 function toggleCamera() {
   usingFrontCamera = !usingFrontCamera; 
-  // snapshots = []; // 切换时不清除照片，保留创作
   initCamera();   
 }
 
 function draw() {
   background(0); 
   
-  // --- 智能镜像处理 ---
   push();
   
+  // 智能镜像处理
   if (usingFrontCamera) {
     translate(width, 0); 
     scale(-1, 1);
