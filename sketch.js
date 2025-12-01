@@ -1,6 +1,6 @@
 /*
- * * 📱 True Final: 软切换(不刷新) + 独立清空
- * * 功能：切换镜头保留作品，清空按钮独立工作
+ * * 📱 FIXED Version: 修复按钮点击无反应的问题
+ * * 修复点：调整事件拦截逻辑，只有拖拽照片时才阻止默认行为
  */
 
 let handPose;
@@ -26,7 +26,7 @@ let margin = 35;       // 手指避让
 
 // 📷 摄像头控制
 let usingFrontCamera = true; 
-let isCameraSwitching = false; // 标记是否正在切换中
+let isCameraSwitching = false; 
 let switchBtn;
 let clearBtn;
 let saveBtn;
@@ -39,32 +39,30 @@ function setup() {
   let c = createCanvas(windowWidth, windowHeight);
   pixelDensity(1);
 
-  // 防滚动
+  // --- 防滚动设置 (仅针对 touchmove) ---
+  // 这行确保手指在画布上滑动时不会拖动整个网页
   c.elt.addEventListener("touchmove", function(event) {
     event.preventDefault();
   }, { passive: false });
-  c.elt.style.touchAction = "none"; 
-  document.body.style.overflow = "hidden"; 
-
+  
   // 初始化摄像头
   initCamera();
 
   // --- UI 按钮 ---
-
-  // 1. 切换按钮 (Switch)
+  // 1. 切换按钮
   switchBtn = createButton('🔄 SWITCH');
   switchBtn.position(20, 20);
   switchBtn.mousePressed(toggleCamera); 
   styleButton(switchBtn);
 
-  // 2. 清空按钮 (Clear)
+  // 2. 清空按钮
   clearBtn = createButton('CLEAR');
   clearBtn.position(width - 100, 20);
   clearBtn.mousePressed(clearAllSnapshots);
   styleButton(clearBtn);
-  clearBtn.style('color', '#d9534f'); // 红色警告色
+  clearBtn.style('color', '#d9534f');
 
-  // 3. 下载按钮 (Download)
+  // 3. 下载按钮
   saveBtn = createButton('⬇️ DOWNLOAD');
   saveBtn.position(width / 2 - 75, height - 80);
   saveBtn.mousePressed(savePicture);
@@ -77,14 +75,12 @@ function clearAllSnapshots() {
   draggedSnapshot = null;
 }
 
-// --- 摄像头软切换逻辑 ---
+// --- 摄像头软切换 ---
 function toggleCamera() {
-  // 如果正在切换中，防止重复点击
   if (isCameraSwitching) return;
   isCameraSwitching = true;
-  switchBtn.html('⌛...'); // 按钮变文字提示
+  switchBtn.html('⌛...'); 
 
-  // 1. 先停止当前视频
   if (video) {
     let stream = video.elt.srcObject;
     if (stream) {
@@ -95,15 +91,12 @@ function toggleCamera() {
     video = null;
   }
 
-  // 2. 切换模式
   usingFrontCamera = !usingFrontCamera;
 
-  // 3. 【关键】等待 500毫秒再请求新摄像头
-  // 给浏览器一点喘息时间，防止硬件锁死
   setTimeout(() => {
     initCamera();
     isCameraSwitching = false;
-    switchBtn.html('🔄 SWITCH'); // 恢复按钮文字
+    switchBtn.html('🔄 SWITCH'); 
   }, 500); 
 }
 
@@ -131,7 +124,6 @@ function draw() {
   background(0); 
   push();
   
-  // 智能镜像
   if (usingFrontCamera) {
     translate(width, 0); 
     scale(-1, 1);
@@ -140,12 +132,10 @@ function draw() {
     scale(1, 1);
   }
   
-  // 1. 背景视频
   if (video) {
     image(video, 0, 0, width, height);
   }
 
-  // 2. 照片 (遍历显示)
   for (let i = 0; i < snapshots.length; i++) {
     let snap = snapshots[i];
     if (snap === draggedSnapshot) {
@@ -160,7 +150,6 @@ function draw() {
     image(snap.img, snap.x, snap.y);
   }
 
-  // 3. 手势识别
   if (hands.length > 0) {
     let hand = hands[0];
     let thumb = hand.keypoints[4];
@@ -183,7 +172,6 @@ function draw() {
     let currentCenterY = y + h / 2;
     let movement = dist(currentCenterX, currentCenterY, lastCenterX, lastCenterY);
     
-    // 定格触发
     if (draggedSnapshot === null && movement < 8 && w > 20 && h > 20) {
       if (!isHovering) {
         hoverStartTime = millis();
@@ -198,7 +186,6 @@ function draw() {
     lastCenterX = currentCenterX;
     lastCenterY = currentCenterY;
 
-    // 视觉反馈
     if (isHovering) {
       let elapsedTime = millis() - hoverStartTime;
       let progress = constrain(elapsedTime / totalTime, 0, 1);
@@ -241,7 +228,10 @@ function gotHands(results) {
   hands = results;
 }
 
-// 交互逻辑
+// ==============================
+// 🖱️ 交互逻辑 (关键修复区)
+// ==============================
+
 function handleInputStart() {
   let inputX = mouseX;
   if (usingFrontCamera) {
@@ -258,10 +248,15 @@ function handleInputStart() {
       dragOffsetY = inputY - s.y;
       snapshots.splice(i, 1);
       snapshots.push(s);
+      
+      // 命中照片：阻止默认行为（不让点击传透）
       return false; 
     }
   }
-  return false;
+  
+  // 【关键修复】：没命中照片（点的是按钮或空地），必须 return true！
+  // 这样按钮才能收到点击事件
+  return true;
 }
 
 function handleInputMove() {
@@ -273,13 +268,15 @@ function handleInputMove() {
     let inputY = mouseY;
     draggedSnapshot.x = inputX - dragOffsetX;
     draggedSnapshot.y = inputY - dragOffsetY;
-    return false; 
+    return false; // 拖拽时阻止滚动
   }
+  // 没拖拽时，允许事件继续（虽然 setup 里已经防滚动了）
+  return true; 
 }
 
 function handleInputEnd() {
   draggedSnapshot = null;
-  return false;
+  return true; // 允许默认行为
 }
 
 function mousePressed() { return handleInputStart(); }
@@ -301,6 +298,7 @@ function styleButton(btn) {
   btn.style('font-weight', 'bold');
   btn.style('touch-action', 'manipulation'); 
   btn.style('z-index', '100'); 
+  btn.style('cursor', 'pointer'); // 鼠标手势
 }
 
 function savePicture() {
